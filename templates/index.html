@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StadiumFlow — AI Real-Time Crowd & Queue Intelligence</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body class="dark-theme">
+    <!-- Top Navigation & Live Match Header -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="brand-logo">
+                <span class="logo-icon">🏟️</span>
+                <div class="brand-text">
+                    <h1>StadiumFlow</h1>
+                    <span class="brand-tagline">Autonomous Venue Crowd Matrix</span>
+                </div>
+            </div>
+            <div class="match-badge">
+                <span class="pulse-dot"></span>
+                <span id="venueMatchInfo">{{ summary.venue_name }} • {{ summary.event_phase }}</span>
+                <span class="attendance-pill" id="venueAttendance">👥 {{ summary.attendance }}</span>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div class="ai-status-pill {% if gemini_ready %}status-active{% else %}status-simulated{% endif %}">
+                <span class="sparkle-icon">✨</span>
+                <span>Gemini 3.8 Flash Vision: <strong>{% if gemini_ready %}Live Connected{% else %}Simulated{% endif
+                        %}</strong></span>
+            </div>
+            <div class="header-controls">
+                <div class="phase-selector-container">
+                    <span class="phase-label">Phase:</span>
+                    <select id="selectMatchPhase" class="custom-select-phase">
+                        <option value="half_time" selected>Half-Time (Busiest)</option>
+                        <option value="pre_match">Pre-Match (Entry)</option>
+                        <option value="first_half">First Half</option>
+                        <option value="post_match">Post-Match (Exit)</option>
+                    </select>
+                </div>
+                <button id="btnSimulateTick" class="btn btn-secondary" title="Advance crowd simulation by 1 step">
+                    ⚡ Step Flow
+                </button>
+                <button id="btnToggleAutoTick" class="btn btn-outline" title="Toggle automatic live crowd pulse">
+                    ▶ Auto Pulse: <span id="autoTickState">OFF</span>
+                </button>
+                <button id="btnResetState" class="btn btn-ghost" title="Reset all venue data">
+                    ↺ Reset
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Dashboard Container -->
+    <main class="dashboard-container">
+        <!-- Key Performance Metric Row -->
+        <section class="metrics-grid">
+            <div class="metric-card glass-panel">
+                <div class="metric-header">
+                    <span class="metric-title">Stadium Congestion</span>
+                    <span class="metric-icon">📊</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value" id="valCongestion">{{ summary.congestion_index }}%</span>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="barCongestion" style="width: {{ summary.congestion_index }}%;">
+                        </div>
+                    </div>
+                </div>
+                <span class="metric-sub" id="subCongestion">Status: Optimal Flow</span>
+            </div>
+
+            <div class="metric-card glass-panel">
+                <div class="metric-header">
+                    <span class="metric-title">Avg Wait Time</span>
+                    <span class="metric-icon">⏱️</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value" id="valAvgWait">{{ summary.avg_wait_minutes }}<span
+                            class="unit">min</span></span>
+                </div>
+                <span class="metric-sub text-emerald">Across all 12 concourse hubs</span>
+            </div>
+
+            <div class="metric-card glass-panel">
+                <div class="metric-header">
+                    <span class="metric-title">Active Chokepoints</span>
+                    <span class="metric-icon">⚠️</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value text-amber" id="valChokepoints">{{ summary.active_chokepoints }}</span>
+                </div>
+                <span class="metric-sub text-amber" id="subChokepoints">Requires steward attention</span>
+            </div>
+
+            <div class="metric-card glass-panel">
+                <div class="metric-header">
+                    <span class="metric-title">Smart Reroutes</span>
+                    <span class="metric-icon">🔄</span>
+                </div>
+                <div class="metric-body">
+                    <span class="metric-value text-cyan" id="valReroutesCount">142</span>
+                </div>
+                <span class="metric-sub text-cyan">Fans diverted to zero-wait lanes</span>
+            </div>
+        </section>
+
+        <!-- Main Workspace: Interactive Map (Left) + AI Inspector (Right) -->
+        <section class="workspace-grid">
+            <!-- Left Column: Interactive Stadium Layout & Zone Details -->
+            <div class="map-column">
+                <div class="glass-panel map-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Interactive Arena Map</h2>
+                            <p class="panel-desc">Click any gate or concession stand to inspect flow or trigger dynamic
+                                diversion.</p>
+                        </div>
+                        <div class="map-legend">
+                            <span class="legend-item"><span class="dot dot-normal"></span>
+                                < 5m Normal</span>
+                                    <span class="legend-item"><span class="dot dot-moderate"></span> 5-10m
+                                        Moderate</span>
+                                    <span class="legend-item"><span class="dot dot-critical"></span> > 10m
+                                        Congested</span>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Stadium SVG Map Container -->
+                    <div class="stadium-map-wrapper" id="stadiumMapContainer">
+                        <svg class="stadium-svg" viewBox="0 0 800 500" id="stadiumSvg">
+                            <defs>
+                                <!-- Field Gradients & Glows -->
+                                <radialGradient id="pitchGlow" cx="50%" cy="50%" r="50%">
+                                    <stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
+                                    <stop offset="100%" stop-color="#047857" stop-opacity="0.05" />
+                                </radialGradient>
+                                <linearGradient id="concourseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#1e293b" stop-opacity="0.8" />
+                                    <stop offset="100%" stop-color="#0f172a" stop-opacity="0.9" />
+                                </linearGradient>
+                                <!-- Filter for glowing elements -->
+                                <filter id="glowEffect" x="-20%" y="-20%" width="140%" height="140%">
+                                    <feGaussianBlur stdDeviation="4" result="blur" />
+                                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                                </filter>
+                            </defs>
+
+                            <!-- Outer Stadium Perimeter Oval -->
+                            <ellipse cx="400" cy="250" rx="360" ry="215" class="svg-stadium-outer" />
+                            <!-- Mid Concourse Ring -->
+                            <ellipse cx="400" cy="250" rx="290" ry="170" class="svg-stadium-concourse" />
+                            <!-- Inner Seating Bowl -->
+                            <ellipse cx="400" cy="250" rx="200" ry="115" class="svg-stadium-bowl" />
+
+                            <!-- Center Pitch / Playing Field -->
+                            <rect x="260" y="180" width="280" height="140" rx="8" class="svg-pitch" />
+                            <circle cx="400" cy="250" r="32" class="svg-pitch-center" />
+                            <line x1="400" y1="180" x2="400" y2="320" class="svg-pitch-line" />
+                            <text x="400" y="254" text-anchor="middle" class="svg-pitch-text">APEX ARENA PITCH</text>
+
+                            <!-- Dynamic SVG Reroute Path (renders connecting line between from & to) -->
+                            <path id="svgReroutePath" d="" class="svg-reroute-line" />
+
+                            <!-- Interactive Zone Nodes Group -->
+                            <g id="svgZoneNodes"></g>
+                        </svg>
+                    </div>
+
+                    <!-- Selected Zone Operational Bar -->
+                    <div class="selected-zone-card" id="selectedZoneCard">
+                        <div class="zone-card-main">
+                            <div class="zone-badge-type" id="zoneBadgeType">CONCESSION</div>
+                            <div class="zone-titles">
+                                <h3 id="zoneName">Craft Burgers & Beer Sec 104</h3>
+                                <p id="zoneSection">North-West Concourse • Max Line 120</p>
+                            </div>
+                            <div class="zone-live-stat">
+                                <div class="stat-number text-amber" id="zoneWaitTime">18 min</div>
+                                <div class="stat-label">Estimated Queue Wait</div>
+                            </div>
+                            <div class="zone-live-stat">
+                                <div class="stat-number" id="zoneHeadcount">110</div>
+                                <div class="stat-label">In Line</div>
+                            </div>
+                        </div>
+
+                        <!-- Bottleneck & Dynamic Action Recommendation -->
+                        <div class="zone-card-details">
+                            <div class="detail-box">
+                                <span class="detail-label">Current Diagnosis</span>
+                                <p class="detail-text" id="zoneDescription">Long queue stretching across corridor. High
+                                    demand for halftime refills.</p>
+                            </div>
+                            <div class="zone-card-actions">
+                                <button id="btnLoadZoneIntoScanner" class="btn btn-sm btn-outline">
+                                    📷 Scan This Queue with AI
+                                </button>
+                                <button id="btnTriggerReroute" class="btn btn-sm btn-primary">
+                                    🔀 Calculate FastPath
+                                </button>
+                                <button id="btnBroadcastAdvisory" class="btn btn-sm btn-warning">
+                                    📢 Push Alert
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Alternative Recommendation Callout -->
+                        <div class="alternative-banner" id="alternativeBanner" style="display: none;">
+                            <div class="alt-info">
+                                <span class="alt-badge">FASTPATH READY</span>
+                                <span id="altBannerText">Divert to <strong>Express Kiosk Sec 108</strong> (2 min wait) —
+                                    Saves ~16 mins!</span>
+                            </div>
+                            <button id="btnApplyReroute" class="btn btn-xs btn-emerald">Activate Diversion</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Gemini Multimodal Vision Scanner & Live Feed -->
+            <div class="inspector-column">
+                <!-- Gemini Vision Queue Scanner -->
+                <div class="glass-panel scanner-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Gemini Multimodal Queue Scanner</h2>
+                            <p class="panel-desc">Upload a CCTV frame or fan photo to estimate queue count and identify
+                                bottlenecks in real-time.</p>
+                        </div>
+                        <span class="model-tag">gemini-3.8-flash</span>
+                    </div>
+
+                    <!-- Preset Scenario Quick-Buttons for Instant Demoing -->
+                    <div class="demo-scenarios">
+                        <span class="scenario-label">Quick Scenarios:</span>
+                        <button class="btn-scenario" data-scenario="congested_burger" data-zone="food_north">
+                            🍔 Halftime Food Court Rush
+                        </button>
+                        <button class="btn-scenario" data-scenario="congested_gate" data-zone="gate_north">
+                            🚪 North Gate Entry Surge
+                        </button>
+                        <button class="btn-scenario" data-scenario="normal_restroom" data-zone="restroom_east">
+                            🚻 Low-Wait East Restroom
+                        </button>
+                    </div>
+
+                    <!-- Upload Area & Image Preview -->
+                    <div class="upload-dropzone" id="uploadDropzone">
+                        <input type="file" id="fileInput" accept="image/*" class="file-input-hidden">
+                        <div class="dropzone-content" id="dropzoneEmpty">
+                            <span class="dropzone-icon">📷</span>
+                            <p><strong>Click or Drag & Drop</strong> a concourse queue photo</p>
+                            <span class="file-types">Supports JPG, PNG, WebP (Max 16MB)</span>
+                        </div>
+                        <div class="preview-wrapper" id="previewWrapper" style="display: none;">
+                            <img id="imagePreview" alt="Queue Preview" src="">
+                            <div class="scanner-laser" id="scannerLaser" style="display: none;"></div>
+                            <button class="btn-clear-image" id="btnClearImage" title="Remove image">✕</button>
+                        </div>
+                    </div>
+
+                    <!-- Analysis Controls -->
+                    <div class="scanner-controls">
+                        <div class="select-group">
+                            <label for="selectTargetZone">Target Facility:</label>
+                            <select id="selectTargetZone" class="custom-select">
+                                {% for z in zones %}
+                                <option value="{{ z.id }}">{{ z.name }} ({{ z.section }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button id="btnRunVisionAnalysis" class="btn btn-primary btn-block">
+                            ✨ Analyze Queue with Gemini AI
+                        </button>
+                    </div>
+
+                    <!-- Gemini AI Analysis Results Card -->
+                    <div class="analysis-results-card" id="analysisResultsCard" style="display: none;">
+                        <div class="result-header">
+                            <div class="result-badge-group">
+                                <span class="badge-ai-model">Gemini Vision AI</span>
+                                <span class="badge-confidence" id="resConfidence">94% Confidence</span>
+                            </div>
+                            <span class="badge-density" id="resDensityBadge">CRITICAL DENSITY</span>
+                        </div>
+
+                        <div class="result-metrics-row">
+                            <div class="res-metric">
+                                <span class="res-metric-label">Headcount</span>
+                                <span class="res-metric-val" id="resHeadcount">--</span>
+                            </div>
+                            <div class="res-metric">
+                                <span class="res-metric-label">Wait Time</span>
+                                <span class="res-metric-val text-amber" id="resWaitMinutes">-- min</span>
+                            </div>
+                            <div class="res-metric">
+                                <span class="res-metric-label">Queue Flow</span>
+                                <span class="res-metric-val" id="resFlowRate">--</span>
+                            </div>
+                        </div>
+
+                        <div class="res-diagnosis-box">
+                            <div class="res-point">
+                                <span class="point-label">🔍 Bottleneck Identified:</span>
+                                <p class="point-text" id="resBottleneck">Analyzing...</p>
+                            </div>
+                            <div class="res-point">
+                                <span class="point-label">🛡️ Tactical Staff Action:</span>
+                                <p class="point-text" id="resMarshalAction">Analyzing...</p>
+                            </div>
+                            <div class="res-point">
+                                <span class="point-label">💡 Fan Navigation Advice:</span>
+                                <p class="point-text" id="resFanAdvice">Analyzing...</p>
+                            </div>
+                        </div>
+
+                        <!-- Auto Divert Action From Vision Output -->
+                        <div class="res-action-footer" id="resActionFooter">
+                            <button id="btnAutoRerouteFromVision" class="btn btn-sm btn-emerald btn-block">
+                                🔀 Apply State & Reroute Concourse Foot Traffic
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Smart Route Finder (best_option) Panel -->
+                <div class="glass-panel wayfinder-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Smart Route Finder</h2>
+                            <p class="panel-desc">Calculates lowest combined walking + waiting time for attendees.</p>
+                        </div>
+                        <span class="model-tag">best_option()</span>
+                    </div>
+                    <div class="wayfinder-inputs">
+                        <div class="select-group">
+                            <label for="wayfinderNeed">Need:</label>
+                            <select id="wayfinderNeed" class="custom-select">
+                                <option value="food">🍔 Food Court</option>
+                                <option value="restroom">🚻 Restroom</option>
+                                <option value="gate">🚪 Gate / Exit</option>
+                                <option value="help_desk">ℹ️ Help Desk</option>
+                                <option value="medical_room">🩺 Medical Room</option>
+                            </select>
+                        </div>
+                        <div class="select-group">
+                            <label for="wayfinderZone">Your Zone:</label>
+                            <select id="wayfinderZone" class="custom-select">
+                                <option value="North">North Zone</option>
+                                <option value="East">East Zone</option>
+                                <option value="South">South Zone</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button id="btnFindBestOption" class="btn btn-sm btn-primary btn-block">
+                        🧭 Find Lowest (Walk + Wait) Facility
+                    </button>
+                    <div id="wayfinderResult" class="wayfinder-result-box" style="display: none;">
+                        <div class="wayfinder-res-header">
+                            <span class="res-target-title" id="wfTitle">East Food Court Express</span>
+                            <span class="badge-total-time" id="wfTotalTime">5 min total</span>
+                        </div>
+                        <div class="wayfinder-res-breakdown">
+                            <span id="wfBreakdown">🚶 1 min walk + ⏳ 4 min wait</span>
+                        </div>
+                        <p class="wayfinder-res-desc" id="wfDesc"></p>
+                    </div>
+                </div><!-- Fan Q&A Assistant Panel -->
+                <div class="glass-panel scanner-panel" id="fanQaPanel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Ask StadiumFlow</h2>
+                            <p class="panel-desc">Ask a question about wait times, facilities, or where to go next.</p>
+                        </div>
+                        <span class="model-tag">gemini-3.8-flash</span>
+                    </div>
+
+                    <div class="demo-scenarios">
+                        <span class="scenario-label">Quick Questions:</span>
+                        <button class="btn-scenario btn-quick-question" type="button"
+                            data-question="Where's the shortest food line near me?">
+                            🍔 Shortest food line?
+                        </button>
+                        <button class="btn-scenario btn-quick-question" type="button"
+                            data-question="Which restroom has the lowest wait right now?">
+                            🚻 Lowest-wait restroom?
+                        </button>
+                        <button class="btn-scenario btn-quick-question" type="button"
+                            data-question="Is it busy near the North Gate right now?">
+                            🚪 North Gate busy?
+                        </button>
+                    </div>
+
+                    <div class="select-group">
+                        <label for="fanQuestionInput">Your question:</label>
+                    </div>
+                    <textarea id="fanQuestionInput" class="custom-select" rows="2" maxlength="300"
+                        placeholder="e.g. Where can I get food fastest from the North Zone?"
+                        aria-label="Ask StadiumFlow a question"></textarea>
+
+                    <button id="btnAskQuestion" class="btn btn-primary btn-block" type="button">
+                        💬 Ask
+                    </button>
+
+                    <div id="fanAnswerArea" class="detail-text" role="status" aria-live="polite" aria-atomic="true">
+                    </div>
+                </div>
+
+                <!-- Live Wait-Time List (auto-refreshing) -->
+                <div class="glass-panel announcements-panel" id="liveWaitListPanel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Live Wait Times</h2>
+                            <p class="panel-desc">Updates automatically every 15 seconds.</p>
+                        </div>
+                    </div>
+                    <ul id="liveWaitList" class="announcements-list" aria-label="Live facility wait times"></ul>
+                </div>
+
+                <!-- Live Stadium Dispatch & Announcements Feed -->
+                <div class="glass-panel announcements-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Live Venue Dispatch Stream</h2>
+                            <p class="panel-desc">Real-time alerts broadcasted to concourse screens and fan apps.</p>
+                        </div>
+                        <span class="feed-live-indicator"><span class="pulse-dot"></span> LIVE</span>
+                    </div>
+
+                    <div class="announcements-list" id="announcementsList">
+                        {% for ann in summary.latest_announcements %}
+                        <div class="announcement-item ann-{{ ann.urgency }}">
+                            <div class="ann-meta">
+                                <span class="ann-time">{{ ann.timestamp }}</span>
+                                <span class="ann-urgency">{{ ann.urgency|upper }}</span>
+                            </div>
+                            <div class="ann-title">{{ ann.title }}</div>
+                            <div class="ann-body">{{ ann.message }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Notification Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Main JavaScript App Logic -->
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+
+</html>
